@@ -1164,9 +1164,6 @@ class IRM_GGA(ERM):
 
     def update(self, minibatches, unlabeled=None):
 
-        if self.gan_transform:
-            minibatches = self.cyclemixLayer(minibatches)
-
         device = "cuda" if minibatches[0][0].is_cuda else "cpu"
         penalty_weight = (self.hparams['irm_lambda'] if self.update_count
                           >= self.hparams['irm_penalty_anneal_iters'] else
