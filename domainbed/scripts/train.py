@@ -8,6 +8,7 @@ import random
 import sys
 import time
 import uuid
+from turtledemo.forest import start
 
 import numpy as np
 import PIL
@@ -51,6 +52,8 @@ if __name__ == "__main__":
         help="For domain adaptation, % of test to use unlabeled for training.")
     parser.add_argument('--skip_model_save', action='store_true')
     parser.add_argument('--save_model_every_checkpoint', action='store_true')
+    parser.add_argument('--start_step', type=int, default=100)
+    parser.add_argument('--end_step', type=int, default=150)
     args = parser.parse_args()
 
     # If we ever want to implement checkpointing, just persist these values
@@ -91,6 +94,13 @@ if __name__ == "__main__":
     hparams['test_envs'] = args.test_envs
     hparams['gan_transform'] = (args.gan_transform == 1)
     hparams['algorithm'] = args.algorithm
+    # My hparams
+    hparams['logdir'] = args.output_dir
+    hparams['neighborhoodSize'] = float(0.0005)
+    hparams['start_step'] = args.start_step
+    hparams['end_step'] = args.end_step
+    hparams['annealing_patience'] = 1000
+
     print('HParams:')
     for k, v in sorted(hparams.items()):
         print('\t{}: {}'.format(k, v))
@@ -224,13 +234,16 @@ if __name__ == "__main__":
                 for x,_ in next(uda_minibatches_iterator)]
         else:
             uda_device = None
-        if args.algorithm != 'CYCLEMIX':
-            step_vals = algorithm.update(minibatches_device, uda_device)
+        # if args.algorithm != 'CYCLEMIX':
+        if args.algorithm in ["IRM_GGA"] and (args.start_step < step < args.end_step):
+            step_vals = algorithm.update_monte_carlo(minibatches_device, uda_device)
         else:
-            if (step / steps_per_epoch) < 15:
-                step_vals = algorithm.update(minibatches_device, uda_device, warmup=True)
-            else:
-                step_vals = algorithm.update(minibatches_device, uda_device, warmup=False)
+            step_vals = algorithm.update(minibatches_device, uda_device)
+        # else:
+        #     if (step / steps_per_epoch) < 15:
+        #         step_vals = algorithm.update(minibatches_device, uda_device, warmup=True)
+        #     else:
+        #         step_vals = algorithm.update(minibatches_device, uda_device, warmup=False)
         checkpoint_vals['step_time'].append(time.time() - step_start_time)
 
         for key, val in step_vals.items():
