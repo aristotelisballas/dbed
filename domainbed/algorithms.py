@@ -7,6 +7,7 @@ import torch.nn.functional as F
 import torch.autograd as autograd
 from torchvision import transforms
 from torchvision.transforms import v2
+from pathlib import Path
 
 import copy
 import numpy as np
@@ -1016,7 +1017,7 @@ class IRM_GGA(ERM):
         self.cos = nn.CosineSimilarity(dim=0)
 
         self.neighborhoodSize = hparams["neighborhoodSize"]
-        self.out_dir = hparams["logdir"]
+        self.out_dir = Path(hparams["logdir"])
         self.patience_limit = hparams["annealing_patience"]
         self.patience_step = 0
         self.best_loss = np.inf

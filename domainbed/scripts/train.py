@@ -96,7 +96,7 @@ if __name__ == "__main__":
     hparams['gan_transform'] = (args.gan_transform == 1)
     hparams['algorithm'] = args.algorithm
     # My hparams
-    hparams['logdir'] = Path(args.output_dir)
+    hparams['logdir'] = str(Path(args.output_dir))
     hparams['neighborhoodSize'] = float(0.0005)
     hparams['start_step'] = args.start_step
     hparams['end_step'] = args.end_step
