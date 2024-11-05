@@ -9,6 +9,7 @@ import sys
 import time
 import uuid
 from turtledemo.forest import start
+from pathlib import Path
 
 import numpy as np
 import PIL
@@ -95,7 +96,7 @@ if __name__ == "__main__":
     hparams['gan_transform'] = (args.gan_transform == 1)
     hparams['algorithm'] = args.algorithm
     # My hparams
-    hparams['logdir'] = args.output_dir
+    hparams['logdir'] = Path(args.output_dir)
     hparams['neighborhoodSize'] = float(0.0005)
     hparams['start_step'] = args.start_step
     hparams['end_step'] = args.end_step
