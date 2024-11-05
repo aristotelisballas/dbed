@@ -1039,7 +1039,8 @@ class IRM_GGA(ERM):
         return result
 
     def update_monte_carlo(self, minibatches, unlabeled=None):
-        x, y = minibatches
+        x = (x for x, y in minibatches)
+        y = (y for x, y in minibatches)
         """
         Perform Monte Carlo Simulation for weights and update based on max average cosine similarity
         between domain grads. The criterion can change.
@@ -1058,8 +1059,8 @@ class IRM_GGA(ERM):
         print("Beginning Monte Carlo Simulation")
         self.network.load_state_dict(torch.load(self.out_dir / "network_start.pt"))
 
-        all_x = torch.cat(x)
-        all_y = torch.cat(y)
+        all_x = torch.cat([x for x, y in minibatches])
+        all_y = torch.cat([y for x, y in minibatches])
 
         grads_i_v = []
 
