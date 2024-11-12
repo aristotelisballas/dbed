@@ -1916,7 +1916,7 @@ class SagNet_GGA(Algorithm):
             loss_i = F.cross_entropy(self.predict(x_i), y_i)
 
             # 2. Flat and add domain grads to list
-            grad_i = autograd.grad(loss_i, self.network.parameters())
+            grad_i = autograd.grad(loss_i, self.network_f.parameters())
             for g in grad_i:
                 grads_i.append(g.flatten())
             grads_i_v.append(torch.cat(grads_i))
@@ -1941,7 +1941,7 @@ class SagNet_GGA(Algorithm):
             finish = 155
             with torch.no_grad():
                 i = 0
-                for param in self.network.parameters():
+                for param in self.network_f.parameters():
                     if start <= i <= finish:
                         # param.add_(torch.randn(param.size()).cuda() * 0.1)
 
@@ -1964,7 +1964,7 @@ class SagNet_GGA(Algorithm):
                 loss_i = F.cross_entropy(self.predict(x_i), y_i)
 
                 # 2. Flat and add domain grads to list
-                grad_i = autograd.grad(loss_i, self.network.parameters())
+                grad_i = autograd.grad(loss_i, self.network_f.parameters())
                 for g in grad_i:
                     grads_i.append(g.flatten())
                 grads_i_v.append(torch.cat(grads_i))
@@ -1986,14 +1986,14 @@ class SagNet_GGA(Algorithm):
                 # save best state
                 found_better = True
                 self.patience_step = 0
-                torch.save(self.network.state_dict(), self.out_dir / "network_best.pt")
+                torch.save(self.network_f.state_dict(), self.out_dir / "network_best.pt")
 
             # self.network.load_state_dict(start_state)
-            self.network.load_state_dict(torch.load(self.out_dir / "network_start.pt"))
+            self.network_f.load_state_dict(torch.load(self.out_dir / "network_start.pt"))
 
         # self.network.load_state_dict(best_state)
-        self.network.load_state_dict(torch.load(self.out_dir / "network_best.pt"))
-        torch.save(self.network.state_dict(), self.out_dir / "network_start.pt")
+        self.network_f.load_state_dict(torch.load(self.out_dir / "network_best.pt"))
+        torch.save(self.network_f.state_dict(), self.out_dir / "network_start.pt")
 
         # if not found_better:
         #     print("Adding 1 to patience")
