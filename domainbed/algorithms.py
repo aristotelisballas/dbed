@@ -862,9 +862,9 @@ class AbstractDANN(Algorithm):
             weight_decay=self.hparams['weight_decay_g'],
             betas=(self.hparams['beta1'], 0.9))
 
-        # GAN AUGEMENTATION
-        self.device = next(self.network.parameters()).device
-        self.dataset = hparams["dataset"]
+        # # GAN AUGEMENTATION
+        # self.device = next(self.network.parameters()).device
+        # self.dataset = hparams["dataset"]
         # self.gan_transform = hparams["gan_transform"]
         # if self.gan_transform:
         #     device = next(self.network.parameters()).device
