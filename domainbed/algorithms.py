@@ -2008,19 +2008,7 @@ class SagNet_GGA(Algorithm):
         # self.optimizer.step()
         print(loss.item())
 
-        # learn content
-        loss_c = F.cross_entropy(self.forward_c(all_x), all_y)
-
-        # learn style
-        loss_s = F.cross_entropy(self.forward_s(all_x), all_y)
-
-        # learn adversary
-        loss_adv = -F.log_softmax(self.forward_s(all_x), dim=1).mean(1).mean()
-        loss_adv = loss_adv * self.weight_adv
-
-        # return {"loss": loss.item()}
-        return {'loss_c': loss_c.item(), 'loss_s': loss_s.item(),
-                'loss_adv': loss_adv.item()}
+        return {"loss": loss.item()}
 
     def update(self, minibatches, unlabeled=None):
 
