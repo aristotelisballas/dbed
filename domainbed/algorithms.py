@@ -1841,16 +1841,16 @@ class SagNet_GGA(Algorithm):
         self.optimizer_s = opt(self.network_s.parameters())
         self.weight_adv = hparams["sag_w_adv"]
 
-        # GAN AUGEMENTATION
-        self.device = next(self.network.parameters()).device
-        self.dataset = hparams["dataset"]
-
-        self.gan_transform = hparams["gan_transform"]
+        # # GAN AUGEMENTATION
+        # self.device = next(self.network.parameters()).device
+        # self.dataset = hparams["dataset"]
+        #
+        # self.gan_transform = hparams["gan_transform"]
 
         device = next(self.network_f.parameters()).device
         # hparams['device'] = self.device
-        if self.gan_transform:
-            self.cyclemixLayer = networks.CycleMix(hparams, device)
+        # if self.gan_transform:
+        #     self.cyclemixLayer = networks.CycleMix(hparams, device)
 
     def forward_c(self, x):
         # learning content network on randomized style
