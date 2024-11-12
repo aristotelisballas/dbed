@@ -237,6 +237,7 @@ if __name__ == "__main__":
             uda_device = None
         # if args.algorithm != 'CYCLEMIX':
         if args.algorithm in ["IRM_GGA", "SagNet_GGA"] and (args.gga_start_step < step < args.gga_start_step):
+            print("starting monte")
             step_vals = algorithm.update_monte_carlo(minibatches_device, uda_device)
         else:
             step_vals = algorithm.update(minibatches_device, uda_device)
