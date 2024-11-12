@@ -53,8 +53,8 @@ if __name__ == "__main__":
         help="For domain adaptation, % of test to use unlabeled for training.")
     parser.add_argument('--skip_model_save', action='store_true')
     parser.add_argument('--save_model_every_checkpoint', action='store_true')
-    parser.add_argument('--start_step', type=int, default=100)
-    parser.add_argument('--end_step', type=int, default=150)
+    parser.add_argument('--gga_start_step', type=int, default=100)
+    parser.add_argument('--gga_end_step', type=int, default=150)
     args = parser.parse_args()
 
     # If we ever want to implement checkpointing, just persist these values
@@ -98,8 +98,8 @@ if __name__ == "__main__":
     # My hparams
     hparams['logdir'] = str(Path(args.output_dir))
     hparams['neighborhoodSize'] = float(0.0005)
-    hparams['start_step'] = args.start_step
-    hparams['end_step'] = args.end_step
+    hparams['gga_start_step'] = args.gga_start_step
+    hparams['gga_start_step'] = args.gga_start_step
     hparams['annealing_patience'] = 1000
 
     print('HParams:')
@@ -236,7 +236,7 @@ if __name__ == "__main__":
         else:
             uda_device = None
         # if args.algorithm != 'CYCLEMIX':
-        if args.algorithm in ["IRM_GGA", "SagNet_GGA"] and (args.start_step < step < args.end_step):
+        if args.algorithm in ["IRM_GGA", "SagNet_GGA"] and (args.gga_start_step < step < args.gga_start_step):
             step_vals = algorithm.update_monte_carlo(minibatches_device, uda_device)
         else:
             step_vals = algorithm.update(minibatches_device, uda_device)
