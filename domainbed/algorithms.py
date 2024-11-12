@@ -1903,7 +1903,7 @@ class SagNet_GGA(Algorithm):
             return self.update(x, y)
 
         print("Beginning Monte Carlo Simulation")
-        self.network.load_state_dict(torch.load(self.out_dir / "network_start.pt"))
+        self.network_f.load_state_dict(torch.load(self.out_dir / "network_start.pt"))
 
         all_x = torch.cat([x for x, y in minibatches])
         all_y = torch.cat([y for x, y in minibatches])
