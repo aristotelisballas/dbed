@@ -38,7 +38,7 @@ def _hparams(algorithm, dataset, random_seed):
     # Algorithm-specific hparam definitions. Each block of code below
     # corresponds to exactly one algorithm.
 
-    if algorithm in ['DANN', 'CDANN']:
+    if algorithm in ['DANN', 'CDANN', 'DANN_GGA']:
         _hparam('lambda', 1.0, lambda r: 10**r.uniform(-2, 2))
         _hparam('weight_decay_d', 0., lambda r: 10**r.uniform(-6, -2))
         _hparam('d_steps_per_g_step', 1, lambda r: int(2**r.uniform(0, 3)))
