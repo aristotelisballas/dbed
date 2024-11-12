@@ -51,7 +51,7 @@ def _hparams(algorithm, dataset, random_seed):
     elif algorithm == 'Fish':
         _hparam('meta_lr', 0.5, lambda r:r.choice([0.05, 0.1, 0.5]))
 
-    elif algorithm == "RSC":
+    elif algorithm in ["RSC", "RSC_GGA"]:
         _hparam('rsc_f_drop_factor', 1/3, lambda r: r.uniform(0, 0.5))
         _hparam('rsc_b_drop_factor', 1/3, lambda r: r.uniform(0, 0.5))
 
@@ -176,7 +176,7 @@ def _hparams(algorithm, dataset, random_seed):
 
     if algorithm in ['DANN', 'CDANN'] and dataset in SMALL_IMAGES:
         _hparam('weight_decay_g', 0., lambda r: 0.)
-    elif algorithm in ['DANN', 'CDANN']:
+    elif algorithm in ['DANN', 'CDANN', 'DANN_GGA']:
         _hparam('weight_decay_g', 0., lambda r: 10**r.uniform(-6, -2))
 
     return hparams

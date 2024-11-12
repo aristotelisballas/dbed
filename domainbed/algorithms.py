@@ -865,14 +865,154 @@ class AbstractDANN(Algorithm):
         # GAN AUGEMENTATION
         self.device = next(self.network.parameters()).device
         self.dataset = hparams["dataset"]
-        self.gan_transform = hparams["gan_transform"]
-        if self.gan_transform:
-            device = next(self.network.parameters()).device
-            self.cyclemixLayer = networks.CycleMix(hparams, device)
+        # self.gan_transform = hparams["gan_transform"]
+        # if self.gan_transform:
+        #     device = next(self.network.parameters()).device
+        #     self.cyclemixLayer = networks.CycleMix(hparams, device)
+
+        self.cos = nn.CosineSimilarity(dim=0)
+
+        self.neighborhoodSize = hparams["neighborhoodSize"]
+        self.out_dir = Path(hparams["logdir"])
+        self.patience_limit = hparams["annealing_patience"]
+        self.patience_step = 0
+        self.best_loss = np.inf
+
+        # save start state
+        torch.save(self.featurizer.state_dict(), self.out_dir / "network_start.pt")
+        # save best state
+        torch.save(self.featurizer.state_dict(), self.out_dir / "network_best.pt")
+
+
+    def update_monte_carlo(self, minibatches, unlabeled=None):
+        x = list(x for x, y in minibatches)
+        y = list(y for x, y in minibatches)
+        """
+        Perform Monte Carlo Simulation for weights and update based on max average cosine similarity
+        between domain grads. The criterion can change.
+        For i in range(iterations):
+            # Step 1 --> Randomly add noise to weights to model parameters
+            # Step 2 --> Calculate domain grads
+            # Step 3 --> Calculate average cos similarity between domain grads and save
+            # Step 4 --> Save model weights (state_dict())
+        # Step 5 --> load weights of optimal parameters
+        # Step 6 --> update step (maybe not)
+        """
+
+        if self.patience_step == self.patience_limit:
+            return self.update(x, y)
+
+        print("Beginning Monte Carlo Simulation")
+        self.featurizer.load_state_dict(torch.load(self.out_dir / "network_start.pt"))
+
+        all_x = torch.cat([x for x, y in minibatches])
+        all_y = torch.cat([y for x, y in minibatches])
+
+        grads_i_v = []
+
+        for x_i, y_i in zip(x, y):
+            grads_i = []
+            # 1. Compute grad of domain batch
+            loss_i = F.cross_entropy(self.predict(x_i), y_i)
+
+            # 2. Flat and add domain grads to list
+            grad_i = autograd.grad(loss_i, self.featurizer.parameters())
+            for g in grad_i:
+                grads_i.append(g.flatten())
+            grads_i_v.append(torch.cat(grads_i))
+
+        c = list(itertools.combinations(list(range(len(grads_i_v))), 2))
+
+        best_avg_sim = 0
+        # start_loss = F.cross_entropy(self.predict(all_x), all_y)
+        for i, j in c:
+            best_avg_sim += self.cos(grads_i_v[i], grads_i_v[j])
+        best_avg_sim /= len(c)
+        # best_crit = start_loss.item() - best_avg_sim
+        # best_loss = start_loss.item()
+        best_loss = self.best_loss
+        # del start_loss
+        ##################
+        search_steps = 30
+        found_better = False
+        for search_step in range(search_steps):
+            # Perturb weights
+            start = 10
+            finish = 155
+            with torch.no_grad():
+                i = 0
+                for param in self.featurizer.parameters():
+                    if start <= i <= finish:
+                        # param.add_(torch.randn(param.size()).cuda() * 0.1)
+
+                        # param.add_(torch.cuda.FloatTensor.normal_(0, 1))
+                        # param.add_(torch.Tensor(np.random.uniform(low=self.neighborhoodSize * -1,)))
+
+                        # param.add_(torch.FloatTensor(torch.normal(0, 1, size=param.shape)).cuda())
+                        # param.add_(torch.cuda.FloatTensor.normal_(0, 1))
+
+                        param.add_(
+                            torch.Tensor(np.random.uniform(low=self.neighborhoodSize * -1, high=self.neighborhoodSize,
+                                                           size=param.shape)).cuda())
+                    i += 1
+
+            grads_i_v = []
+
+            for x_i, y_i in zip(x, y):
+                grads_i = []
+                # 1. Compute grad of domain batch
+                loss_i = F.cross_entropy(self.predict(x_i), y_i)
+
+                # 2. Flat and add domain grads to list
+                grad_i = autograd.grad(loss_i, self.featurizer.parameters())
+                for g in grad_i:
+                    grads_i.append(g.flatten())
+                grads_i_v.append(torch.cat(grads_i))
+
+            c = list(itertools.combinations(list(range(len(grads_i_v))), 2))
+
+            step_avg_sim = 0
+            step_loss = F.cross_entropy(self.predict(all_x), all_y)
+            step_loss = step_loss.item()
+            for i, j in c:
+                step_avg_sim += self.cos(grads_i_v[i], grads_i_v[j])
+            step_avg_sim /= len(c)
+            # crit_step = step_loss.item() - avg_sim
+            if step_loss < best_loss and step_avg_sim > best_avg_sim:
+                best_loss = step_loss
+                best_avg_sim = step_avg_sim
+                print(f"Best similarity ({best_avg_sim}) and loss {best_loss} found in iter: {search_step}")
+                # best_state = copy.deepcopy(self.network.state_dict())
+                # save best state
+                found_better = True
+                self.patience_step = 0
+                torch.save(self.featurizer.state_dict(), self.out_dir / "network_best.pt")
+
+            # self.network.load_state_dict(start_state)
+            self.featurizer.load_state_dict(torch.load(self.out_dir / "network_start.pt"))
+
+        # self.network.load_state_dict(best_state)
+        self.featurizer.load_state_dict(torch.load(self.out_dir / "network_best.pt"))
+        torch.save(self.featurizer.state_dict(), self.out_dir / "network_start.pt")
+
+        # if not found_better:
+        #     print("Adding 1 to patience")
+        #     self.patience_step += 1
+        #     if self.patience_step == self.patience_limit:
+        #         print("Stopping Monte Carlo Simulation - Warmup")
+
+        loss = F.cross_entropy(self.predict(all_x), all_y)
+        # self.optimizer.zero_grad()
+        # loss.backward()
+        #
+        # self.optimizer.step()
+        print(loss.item())
+
+        return {"loss": loss.item()}
 
     def update(self, minibatches, unlabeled=None):
-        if self.gan_transform:
-            minibatches = self.cyclemixLayer(minibatches)
+        # if self.gan_transform:
+        #     minibatches = self.cyclemixLayer(minibatches)
         device = "cuda" if minibatches[0][0].is_cuda else "cpu"
         self.update_count += 1
         all_x = torch.cat([x for x, y in minibatches])
@@ -927,6 +1067,12 @@ class DANN(AbstractDANN):
     """Unconditional DANN"""
     def __init__(self, input_shape, num_classes, num_domains, hparams):
         super(DANN, self).__init__(input_shape, num_classes, num_domains,
+            hparams, conditional=False, class_balance=False)
+
+class DANN_GGA(AbstractDANN):
+    """Unconditional DANN"""
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(DANN_GGA, self).__init__(input_shape, num_classes, num_domains,
             hparams, conditional=False, class_balance=False)
 
 
@@ -2067,6 +2213,203 @@ class RSC(ERM):
 
         if self.gan_transform:
             minibatches = self.cyclemixLayer(minibatches)
+
+        # inputs
+        all_x = torch.cat([x for x, y in minibatches])
+        # labels
+        all_y = torch.cat([y for _, y in minibatches])
+        # one-hot labels
+        all_o = torch.nn.functional.one_hot(all_y, self.num_classes)
+        # features
+        all_f = self.featurizer(all_x)
+        # predictions
+        all_p = self.classifier(all_f)
+
+        # Equation (1): compute gradients with respect to representation
+        all_g = autograd.grad((all_p * all_o).sum(), all_f)[0]
+
+        # Equation (2): compute top-gradient-percentile mask
+        percentiles = np.percentile(all_g.cpu(), self.drop_f, axis=1)
+        percentiles = torch.Tensor(percentiles)
+        percentiles = percentiles.unsqueeze(1).repeat(1, all_g.size(1))
+        mask_f = all_g.lt(percentiles.to(device)).float()
+
+        # Equation (3): mute top-gradient-percentile activations
+        all_f_muted = all_f * mask_f
+
+        # Equation (4): compute muted predictions
+        all_p_muted = self.classifier(all_f_muted)
+
+        # Section 3.3: Batch Percentage
+        all_s = F.softmax(all_p, dim=1)
+        all_s_muted = F.softmax(all_p_muted, dim=1)
+        changes = (all_s * all_o).sum(1) - (all_s_muted * all_o).sum(1)
+        percentile = np.percentile(changes.detach().cpu(), self.drop_b)
+        mask_b = changes.lt(percentile).float().view(-1, 1)
+        mask = torch.logical_or(mask_f, mask_b).float()
+
+        # Equations (3) and (4) again, this time mutting over examples
+        all_p_muted_again = self.classifier(all_f * mask)
+
+        # Equation (5): update
+        loss = F.cross_entropy(all_p_muted_again, all_y)
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        return {'loss': loss.item()}
+
+
+
+class RSC_GGA(ERM):
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(RSC_GGA, self).__init__(input_shape, num_classes, num_domains,
+                                   hparams)
+        self.drop_f = (1 - hparams['rsc_f_drop_factor']) * 100
+        self.drop_b = (1 - hparams['rsc_b_drop_factor']) * 100
+        self.num_classes = num_classes
+
+        self.cos = nn.CosineSimilarity(dim=0)
+
+        self.neighborhoodSize = hparams["neighborhoodSize"]
+        self.out_dir = Path(hparams["logdir"])
+        self.patience_limit = hparams["annealing_patience"]
+        self.patience_step = 0
+        self.best_loss = np.inf
+
+        # save start state
+        torch.save(self.network.state_dict(), self.out_dir / "network_start.pt")
+        # save best state
+        torch.save(self.network.state_dict(), self.out_dir / "network_best.pt")
+
+    def update_monte_carlo(self, minibatches, unlabeled=None):
+        x = list(x for x, y in minibatches)
+        y = list(y for x, y in minibatches)
+        """
+        Perform Monte Carlo Simulation for weights and update based on max average cosine similarity
+        between domain grads. The criterion can change.
+        For i in range(iterations):
+            # Step 1 --> Randomly add noise to weights to model parameters
+            # Step 2 --> Calculate domain grads
+            # Step 3 --> Calculate average cos similarity between domain grads and save
+            # Step 4 --> Save model weights (state_dict())
+        # Step 5 --> load weights of optimal parameters
+        # Step 6 --> update step (maybe not)
+        """
+
+        if self.patience_step == self.patience_limit:
+            return self.update(x, y)
+
+        print("Beginning Monte Carlo Simulation")
+        self.network.load_state_dict(torch.load(self.out_dir / "network_start.pt"))
+
+        all_x = torch.cat([x for x, y in minibatches])
+        all_y = torch.cat([y for x, y in minibatches])
+
+        grads_i_v = []
+
+        for x_i, y_i in zip(x, y):
+            grads_i = []
+            # 1. Compute grad of domain batch
+            loss_i = F.cross_entropy(self.predict(x_i), y_i)
+
+            # 2. Flat and add domain grads to list
+            grad_i = autograd.grad(loss_i, self.network.parameters())
+            for g in grad_i:
+                grads_i.append(g.flatten())
+            grads_i_v.append(torch.cat(grads_i))
+
+        c = list(itertools.combinations(list(range(len(grads_i_v))), 2))
+
+        best_avg_sim = 0
+        # start_loss = F.cross_entropy(self.predict(all_x), all_y)
+        for i, j in c:
+            best_avg_sim += self.cos(grads_i_v[i], grads_i_v[j])
+        best_avg_sim /= len(c)
+        # best_crit = start_loss.item() - best_avg_sim
+        # best_loss = start_loss.item()
+        best_loss = self.best_loss
+        # del start_loss
+        ##################
+        search_steps = 30
+        found_better = False
+        for search_step in range(search_steps):
+            # Perturb weights
+            start = 10
+            finish = 155
+            with torch.no_grad():
+                i = 0
+                for param in self.network.parameters():
+                    if start <= i <= finish:
+                        # param.add_(torch.randn(param.size()).cuda() * 0.1)
+
+                        # param.add_(torch.cuda.FloatTensor.normal_(0, 1))
+                        # param.add_(torch.Tensor(np.random.uniform(low=self.neighborhoodSize * -1,)))
+
+                        # param.add_(torch.FloatTensor(torch.normal(0, 1, size=param.shape)).cuda())
+                        # param.add_(torch.cuda.FloatTensor.normal_(0, 1))
+
+                        param.add_(
+                            torch.Tensor(np.random.uniform(low=self.neighborhoodSize * -1, high=self.neighborhoodSize,
+                                                           size=param.shape)).cuda())
+                    i += 1
+
+            grads_i_v = []
+
+            for x_i, y_i in zip(x, y):
+                grads_i = []
+                # 1. Compute grad of domain batch
+                loss_i = F.cross_entropy(self.predict(x_i), y_i)
+
+                # 2. Flat and add domain grads to list
+                grad_i = autograd.grad(loss_i, self.network.parameters())
+                for g in grad_i:
+                    grads_i.append(g.flatten())
+                grads_i_v.append(torch.cat(grads_i))
+
+            c = list(itertools.combinations(list(range(len(grads_i_v))), 2))
+
+            step_avg_sim = 0
+            step_loss = F.cross_entropy(self.predict(all_x), all_y)
+            step_loss = step_loss.item()
+            for i, j in c:
+                step_avg_sim += self.cos(grads_i_v[i], grads_i_v[j])
+            step_avg_sim /= len(c)
+            # crit_step = step_loss.item() - avg_sim
+            if step_loss < best_loss and step_avg_sim > best_avg_sim:
+                best_loss = step_loss
+                best_avg_sim = step_avg_sim
+                print(f"Best similarity ({best_avg_sim}) and loss {best_loss} found in iter: {search_step}")
+                # best_state = copy.deepcopy(self.network.state_dict())
+                # save best state
+                found_better = True
+                self.patience_step = 0
+                torch.save(self.network.state_dict(), self.out_dir / "network_best.pt")
+
+            # self.network.load_state_dict(start_state)
+            self.network.load_state_dict(torch.load(self.out_dir / "network_start.pt"))
+
+        # self.network.load_state_dict(best_state)
+        self.network.load_state_dict(torch.load(self.out_dir / "network_best.pt"))
+        torch.save(self.network.state_dict(), self.out_dir / "network_start.pt")
+
+        # if not found_better:
+        #     print("Adding 1 to patience")
+        #     self.patience_step += 1
+        #     if self.patience_step == self.patience_limit:
+        #         print("Stopping Monte Carlo Simulation - Warmup")
+
+        loss = F.cross_entropy(self.predict(all_x), all_y)
+        # self.optimizer.zero_grad()
+        # loss.backward()
+        #
+        # self.optimizer.step()
+        print(loss.item())
+
+        return {"loss": loss.item()}
+
+    def update(self, minibatches, unlabeled=None):
+        device = "cuda" if minibatches[0][0].is_cuda else "cpu"
 
         # inputs
         all_x = torch.cat([x for x, y in minibatches])
