@@ -1793,7 +1793,7 @@ class SagNet_GGA(Algorithm):
             self.hparams['nonlinear_classifier'])
 
         self.cos = nn.CosineSimilarity(dim=0)
-
+        self.out_dir = Path(hparams["logdir"])
         self.neighborhoodSize = hparams["neighborhoodSize"]
         self.out_dir = Path(hparams["logdir"])
         self.patience_limit = hparams["annealing_patience"]
@@ -1801,9 +1801,9 @@ class SagNet_GGA(Algorithm):
         self.best_loss = np.inf
 
         # save start state
-        torch.save(self.network.state_dict(), self.out_dir / "network_start.pt")
+        torch.save(self.network_f.state_dict(), self.out_dir / "network_start.pt")
         # save best state
-        torch.save(self.network.state_dict(), self.out_dir / "network_best.pt")
+        torch.save(self.network_f.state_dict(), self.out_dir / "network_best.pt")
 
         # # This commented block of code implements something closer to the
         # # original paper, but is specific to ResNet and puts in disadvantage
