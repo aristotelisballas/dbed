@@ -2012,8 +2012,8 @@ class SagNet_GGA(Algorithm):
 
     def update(self, minibatches, unlabeled=None):
 
-        if self.gan_transform:
-            minibatches = self.cyclemixLayer(minibatches)
+        # if self.gan_transform:
+        #     minibatches = self.cyclemixLayer(minibatches)
 
         all_x = torch.cat([x for x, y in minibatches])
         all_y = torch.cat([y for x, y in minibatches])
