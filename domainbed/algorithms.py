@@ -1039,8 +1039,8 @@ class IRM_GGA(ERM):
         return result
 
     def update_monte_carlo(self, minibatches, unlabeled=None):
-        x = (x for x, y in minibatches)
-        y = (y for x, y in minibatches)
+        x = list(x for x, y in minibatches)
+        y = list(y for x, y in minibatches)
         """
         Perform Monte Carlo Simulation for weights and update based on max average cosine similarity
         between domain grads. The criterion can change.
@@ -1734,6 +1734,281 @@ class SagNet(Algorithm):
 
         x = x * (var + eps).sqrt() + mean
         return x.view(*sizes)
+
+    def update(self, minibatches, unlabeled=None):
+
+        if self.gan_transform:
+            minibatches = self.cyclemixLayer(minibatches)
+
+        all_x = torch.cat([x for x, y in minibatches])
+        all_y = torch.cat([y for x, y in minibatches])
+
+        # learn content
+        self.optimizer_f.zero_grad()
+        self.optimizer_c.zero_grad()
+        loss_c = F.cross_entropy(self.forward_c(all_x), all_y)
+        loss_c.backward()
+        self.optimizer_f.step()
+        self.optimizer_c.step()
+
+        # learn style
+        self.optimizer_s.zero_grad()
+        loss_s = F.cross_entropy(self.forward_s(all_x), all_y)
+        loss_s.backward()
+        self.optimizer_s.step()
+
+        # learn adversary
+        self.optimizer_f.zero_grad()
+        loss_adv = -F.log_softmax(self.forward_s(all_x), dim=1).mean(1).mean()
+        loss_adv = loss_adv * self.weight_adv
+        loss_adv.backward()
+        self.optimizer_f.step()
+
+        return {'loss_c': loss_c.item(), 'loss_s': loss_s.item(),
+                'loss_adv': loss_adv.item()}
+
+    def predict(self, x):
+        return self.network_c(self.network_f(x))
+
+class SagNet_GGA(Algorithm):
+    """
+    Style Agnostic Network
+    Algorithm 1 from: https://arxiv.org/abs/1910.11645
+    """
+
+    def __init__(self, input_shape, num_classes, num_domains, hparams):
+        super(SagNet_GGA, self).__init__(input_shape, num_classes, num_domains,
+                                  hparams)
+        # featurizer network
+        self.network_f = networks.Featurizer(input_shape, self.hparams)
+        # content network
+        self.network_c = networks.Classifier(
+            self.network_f.n_outputs,
+            num_classes,
+            self.hparams['nonlinear_classifier'])
+        # style network
+        self.network_s = networks.Classifier(
+            self.network_f.n_outputs,
+            num_classes,
+            self.hparams['nonlinear_classifier'])
+
+        self.cos = nn.CosineSimilarity(dim=0)
+
+        self.neighborhoodSize = hparams["neighborhoodSize"]
+        self.out_dir = Path(hparams["logdir"])
+        self.patience_limit = hparams["annealing_patience"]
+        self.patience_step = 0
+        self.best_loss = np.inf
+
+        # save start state
+        torch.save(self.network.state_dict(), self.out_dir / "network_start.pt")
+        # save best state
+        torch.save(self.network.state_dict(), self.out_dir / "network_best.pt")
+
+        # # This commented block of code implements something closer to the
+        # # original paper, but is specific to ResNet and puts in disadvantage
+        # # the other algorithms.
+        # resnet_c = networks.Featurizer(input_shape, self.hparams)
+        # resnet_s = networks.Featurizer(input_shape, self.hparams)
+        # # featurizer network
+        # self.network_f = torch.nn.Sequential(
+        #         resnet_c.network.conv1,
+        #         resnet_c.network.bn1,
+        #         resnet_c.network.relu,
+        #         resnet_c.network.maxpool,
+        #         resnet_c.network.layer1,
+        #         resnet_c.network.layer2,
+        #         resnet_c.network.layer3)
+        # # content network
+        # self.network_c = torch.nn.Sequential(
+        #         resnet_c.network.layer4,
+        #         resnet_c.network.avgpool,
+        #         networks.Flatten(),
+        #         resnet_c.network.fc)
+        # # style network
+        # self.network_s = torch.nn.Sequential(
+        #         resnet_s.network.layer4,
+        #         resnet_s.network.avgpool,
+        #         networks.Flatten(),
+        #         resnet_s.network.fc)
+
+        def opt(p):
+            return torch.optim.Adam(p, lr=hparams["lr"],
+                    weight_decay=hparams["weight_decay"])
+
+        self.optimizer_f = opt(self.network_f.parameters())
+        self.optimizer_c = opt(self.network_c.parameters())
+        self.optimizer_s = opt(self.network_s.parameters())
+        self.weight_adv = hparams["sag_w_adv"]
+
+        # GAN AUGEMENTATION
+        self.device = next(self.network.parameters()).device
+        self.dataset = hparams["dataset"]
+
+        self.gan_transform = hparams["gan_transform"]
+
+        device = next(self.network_f.parameters()).device
+        # hparams['device'] = self.device
+        if self.gan_transform:
+            self.cyclemixLayer = networks.CycleMix(hparams, device)
+
+    def forward_c(self, x):
+        # learning content network on randomized style
+        return self.network_c(self.randomize(self.network_f(x), "style"))
+
+    def forward_s(self, x):
+        # learning style network on randomized content
+        return self.network_s(self.randomize(self.network_f(x), "content"))
+
+    def randomize(self, x, what="style", eps=1e-5):
+        device = "cuda" if x.is_cuda else "cpu"
+        sizes = x.size()
+        alpha = torch.rand(sizes[0], 1).to(device)
+
+        if len(sizes) == 4:
+            x = x.view(sizes[0], sizes[1], -1)
+            alpha = alpha.unsqueeze(-1)
+
+        mean = x.mean(-1, keepdim=True)
+        var = x.var(-1, keepdim=True)
+
+        x = (x - mean) / (var + eps).sqrt()
+
+        idx_swap = torch.randperm(sizes[0])
+        if what == "style":
+            mean = alpha * mean + (1 - alpha) * mean[idx_swap]
+            var = alpha * var + (1 - alpha) * var[idx_swap]
+        else:
+            x = x[idx_swap].detach()
+
+        x = x * (var + eps).sqrt() + mean
+        return x.view(*sizes)
+
+    def update_monte_carlo(self, minibatches, unlabeled=None):
+        x = list(x for x, y in minibatches)
+        y = list(y for x, y in minibatches)
+        """
+        Perform Monte Carlo Simulation for weights and update based on max average cosine similarity
+        between domain grads. The criterion can change.
+        For i in range(iterations):
+            # Step 1 --> Randomly add noise to weights to model parameters
+            # Step 2 --> Calculate domain grads
+            # Step 3 --> Calculate average cos similarity between domain grads and save
+            # Step 4 --> Save model weights (state_dict())
+        # Step 5 --> load weights of optimal parameters
+        # Step 6 --> update step (maybe not)
+        """
+
+        if self.patience_step == self.patience_limit:
+            return self.update(x, y)
+
+        print("Beginning Monte Carlo Simulation")
+        self.network.load_state_dict(torch.load(self.out_dir / "network_start.pt"))
+
+        all_x = torch.cat([x for x, y in minibatches])
+        all_y = torch.cat([y for x, y in minibatches])
+
+        grads_i_v = []
+
+        for x_i, y_i in zip(x, y):
+            grads_i = []
+            # 1. Compute grad of domain batch
+            loss_i = F.cross_entropy(self.predict(x_i), y_i)
+
+            # 2. Flat and add domain grads to list
+            grad_i = autograd.grad(loss_i, self.network.parameters())
+            for g in grad_i:
+                grads_i.append(g.flatten())
+            grads_i_v.append(torch.cat(grads_i))
+
+        c = list(itertools.combinations(list(range(len(grads_i_v))), 2))
+
+        best_avg_sim = 0
+        # start_loss = F.cross_entropy(self.predict(all_x), all_y)
+        for i, j in c:
+            best_avg_sim += self.cos(grads_i_v[i], grads_i_v[j])
+        best_avg_sim /= len(c)
+        # best_crit = start_loss.item() - best_avg_sim
+        # best_loss = start_loss.item()
+        best_loss = self.best_loss
+        # del start_loss
+        ##################
+        search_steps = 30
+        found_better = False
+        for search_step in range(search_steps):
+            # Perturb weights
+            start = 10
+            finish = 155
+            with torch.no_grad():
+                i = 0
+                for param in self.network.parameters():
+                    if start <= i <= finish:
+                        # param.add_(torch.randn(param.size()).cuda() * 0.1)
+
+                        # param.add_(torch.cuda.FloatTensor.normal_(0, 1))
+                        # param.add_(torch.Tensor(np.random.uniform(low=self.neighborhoodSize * -1,)))
+
+                        # param.add_(torch.FloatTensor(torch.normal(0, 1, size=param.shape)).cuda())
+                        # param.add_(torch.cuda.FloatTensor.normal_(0, 1))
+
+                        param.add_(
+                            torch.Tensor(np.random.uniform(low=self.neighborhoodSize * -1, high=self.neighborhoodSize,
+                                                           size=param.shape)).cuda())
+                    i += 1
+
+            grads_i_v = []
+
+            for x_i, y_i in zip(x, y):
+                grads_i = []
+                # 1. Compute grad of domain batch
+                loss_i = F.cross_entropy(self.predict(x_i), y_i)
+
+                # 2. Flat and add domain grads to list
+                grad_i = autograd.grad(loss_i, self.network.parameters())
+                for g in grad_i:
+                    grads_i.append(g.flatten())
+                grads_i_v.append(torch.cat(grads_i))
+
+            c = list(itertools.combinations(list(range(len(grads_i_v))), 2))
+
+            step_avg_sim = 0
+            step_loss = F.cross_entropy(self.predict(all_x), all_y)
+            step_loss = step_loss.item()
+            for i, j in c:
+                step_avg_sim += self.cos(grads_i_v[i], grads_i_v[j])
+            step_avg_sim /= len(c)
+            # crit_step = step_loss.item() - avg_sim
+            if step_loss < best_loss and step_avg_sim > best_avg_sim:
+                best_loss = step_loss
+                best_avg_sim = step_avg_sim
+                print(f"Best similarity ({best_avg_sim}) and loss {best_loss} found in iter: {search_step}")
+                # best_state = copy.deepcopy(self.network.state_dict())
+                # save best state
+                found_better = True
+                self.patience_step = 0
+                torch.save(self.network.state_dict(), self.out_dir / "network_best.pt")
+
+            # self.network.load_state_dict(start_state)
+            self.network.load_state_dict(torch.load(self.out_dir / "network_start.pt"))
+
+        # self.network.load_state_dict(best_state)
+        self.network.load_state_dict(torch.load(self.out_dir / "network_best.pt"))
+        torch.save(self.network.state_dict(), self.out_dir / "network_start.pt")
+
+        # if not found_better:
+        #     print("Adding 1 to patience")
+        #     self.patience_step += 1
+        #     if self.patience_step == self.patience_limit:
+        #         print("Stopping Monte Carlo Simulation - Warmup")
+
+        loss = F.cross_entropy(self.predict(all_x), all_y)
+        # self.optimizer.zero_grad()
+        # loss.backward()
+        #
+        # self.optimizer.step()
+        print(loss.item())
+
+        return {"loss": loss.item()}
 
     def update(self, minibatches, unlabeled=None):
 
