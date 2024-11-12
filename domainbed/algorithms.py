@@ -1626,15 +1626,15 @@ class AbstractMMD(ERM):
         else:
             self.kernel_type = "mean_cov"
 
-        # GAN AUGEMENTATION
-        self.device = next(self.network.parameters()).device
-        self.dataset = hparams["dataset"]
-
-        self.gan_transform = hparams["gan_transform"]
-
-        device = next(self.network.parameters()).device
-        if self.gan_transform:
-            self.cyclemixLayer = networks.CycleMix(hparams, device)
+        # # GAN AUGEMENTATION
+        # self.device = next(self.network.parameters()).device
+        # self.dataset = hparams["dataset"]
+        #
+        # self.gan_transform = hparams["gan_transform"]
+        #
+        # device = next(self.network.parameters()).device
+        # if self.gan_transform:
+        #     self.cyclemixLayer = networks.CycleMix(hparams, device)
 
     def my_cdist(self, x1, x2):
         x1_norm = x1.pow(2).sum(dim=-1, keepdim=True)
@@ -1675,8 +1675,8 @@ class AbstractMMD(ERM):
 
     def update(self, minibatches, unlabeled=None):
 
-        if self.gan_transform:
-            minibatches = self.cyclemixLayer(minibatches)
+        # if self.gan_transform:
+        #     minibatches = self.cyclemixLayer(minibatches)
 
         objective = 0
         penalty = 0
